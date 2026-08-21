@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js';
-import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from 'firebase/auth';
 
-// 新しいFirebase設定値
+// Firebase設定値
 const firebaseConfig = {
   apiKey: "AIzaSyCFFdgAH5nTA7s6kjKgBusrfEmdbe5p6-8",
   authDomain: "school-club-management-b01ad.firebaseapp.com",
