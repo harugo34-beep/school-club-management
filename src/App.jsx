@@ -2,14 +2,14 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js';
 import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js';
 
-// 発行されたFirebaseの設定
+// 新しいFirebase設定値
 const firebaseConfig = {
-  apiKey: "AIzaSyACouAvE-DdPRv-8hIpygvkTV9QnUPu_zE",
-  authDomain: "chikuyo-volleyball.firebaseapp.com",
-  projectId: "chikuyo-volleyball",
-  storageBucket: "chikuyo-volleyball.firebasestorage.app",
-  messagingSenderId: "387853329149",
-  appId: "1:387853329149:web:98468f2a729a5acb1a1494"
+  apiKey: "AIzaSyCFFdgAH5nTA7s6kjKgBusrfEmdbe5p6-8",
+  authDomain: "school-club-management-b01ad.firebaseapp.com",
+  projectId: "school-club-management-b01ad",
+  storageBucket: "school-club-management-b01ad.firebasestorage.app",
+  messagingSenderId: "528860396983",
+  appId: "1:528860396983:web:7421c10fc0f95cbfa33c32"
 };
 
 let app, auth;
@@ -25,7 +25,7 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
 
   const [activeTab, setActiveTab] = useState('attendance');
-  const schoolName = '筑陽学園';
+  const schoolName = '部活動管理';
 
   const [teacherEmails, setTeacherEmails] = useState(() => {
     try {
@@ -170,7 +170,6 @@ export default function App() {
         console.warn("Popup sign-in error/fallback.", err);
       }
     }
-    // デモログインフォールバック
     const email = prompt("Googleアカウントのメールアドレスを入力してください:", "student@school.ed.jp");
     if (!email) return;
     const isTeacher = teacherEmails.includes(email) || email.includes('teacher');
@@ -217,7 +216,7 @@ export default function App() {
   }
 
   if (!user) {
-    return <LoginScreen onGoogleLogin={handleGoogleLogin} />;
+    return <LoginScreen onGoogleLogin={handleGoogleLogin} schoolName={schoolName} />;
   }
 
   return (
@@ -228,7 +227,7 @@ export default function App() {
             V
           </div>
           <div>
-            <h1 className="font-extrabold text-sm sm:text-lg tracking-tight leading-tight">{schoolName}高校バレーボール部</h1>
+            <h1 className="font-extrabold text-sm sm:text-lg tracking-tight leading-tight">{schoolName}</h1>
           </div>
         </div>
 
@@ -285,7 +284,7 @@ export default function App() {
   );
 }
 
-function LoginScreen({ onGoogleLogin }) {
+function LoginScreen({ onGoogleLogin, schoolName }) {
   return (
     <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 px-4 py-8">
       <div className="bg-white p-6 sm:p-10 rounded-3xl shadow-2xl max-w-md w-full text-center border border-slate-100 space-y-6">
@@ -293,7 +292,7 @@ function LoginScreen({ onGoogleLogin }) {
           V
         </div>
         <div>
-          <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">筑陽学園高校バレーボール部</h1>
+          <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">{schoolName}</h1>
           <p className="text-xs text-slate-400 mt-1">公式ポータルシステム</p>
         </div>
 
