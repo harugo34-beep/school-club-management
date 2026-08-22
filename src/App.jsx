@@ -35,16 +35,18 @@ export default function App() {
       return saved ? JSON.parse(saved) : [
         'goto638@g.chikuyogakuen.ed.jp',
         'fujimoto530@365.chikuyogakuen.ed.jp',
+       
       ];
     } catch (e) {
       return [
         'goto638@g.chikuyogakuen.ed.jp',
         'fujimoto530@365.chikuyogakuen.ed.jp',
+       
       ];
     }
   });
 
-  // 部員データ（プレビュー用初期データを空にしました）
+  // 部員データ（プレビュー用データを完全に削除）
   const [members, setMembers] = useState(() => {
     try {
       const saved = localStorage.getItem('vn_members');
@@ -84,6 +86,7 @@ export default function App() {
     } catch (e) { return {}; }
   });
 
+  // スケジュール（プレビュー用データを削除）
   const [schedules, setSchedules] = useState(() => {
     try {
       const saved = localStorage.getItem('vn_schedules');
@@ -91,6 +94,7 @@ export default function App() {
     } catch (e) { return []; }
   });
 
+  // 練習メニュー（プレビュー用データを削除）
   const [practiceMenus, setPracticeMenus] = useState(() => {
     try {
       const saved = localStorage.getItem('vn_practiceMenus');
@@ -98,6 +102,7 @@ export default function App() {
     } catch (e) { return {}; }
   });
 
+  // 活動記録（プレビュー用データを削除）
   const [activities, setActivities] = useState(() => {
     try {
       const saved = localStorage.getItem('vn_activities');
@@ -111,6 +116,21 @@ export default function App() {
       return saved ? JSON.parse(saved) : [];
     } catch (e) { return []; }
   });
+
+  // ==========================================
+  // 【重要】メンバーが削除されたら、連動して過去の活動記録も自動で一掃（パージ）する処理
+  // すでに残ってしまっている「部員太郎」等の不要なデータもここで消去されます。
+  // ==========================================
+  useEffect(() => {
+    setActivities(prev => {
+      // 現在の members に存在しているユーザーの活動記録だけを残す
+      const validActivities = prev.filter(a => members.some(m => m.id === a.userId));
+      if (validActivities.length !== prev.length) {
+        return validActivities;
+      }
+      return prev;
+    });
+  }, [members]);
 
   // 認証状態の変更監視
   useEffect(() => {
@@ -150,7 +170,6 @@ export default function App() {
           setPendingAuthUser({
             id: firebaseUser.uid,
             email: email,
-            defaultName: firebaseUser.displayName || '',
             isTeacher: isTeacher
           });
         }
@@ -209,7 +228,6 @@ export default function App() {
       setPendingAuthUser({
         id: 'usr_' + Date.now(),
         email: cleanEmail,
-        defaultName: "",
         isTeacher: isTeacher
       });
     }
@@ -352,7 +370,8 @@ export default function App() {
 // ======= 新規アカウント登録・確認画面コンポーネント =======
 function RegistrationScreen({ pendingAuthUser, onComplete, onCancel }) {
   const [step, setStep] = useState('input'); // 'input' または 'confirm'
-  const [name, setName] = useState(pendingAuthUser.defaultName || '');
+  // 教師も生徒も、最初は名前を空にして手入力させる
+  const [name, setName] = useState('');
   const [furigana, setFurigana] = useState('');
   const [grade, setGrade] = useState('1'); // 教師の場合は使用されない
 
@@ -1000,6 +1019,7 @@ function ActivityModule({ user, members, activities, setActivities, teacherEmail
         )}
       </div>
 
+      {/* 活動記録の投稿フォームは「生徒」の場合のみ表示 */}
       {user.role === 'student' && (
         <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
           <h3 className="text-sm font-black text-slate-900 mb-4">新規活動記録の投稿</h3>
@@ -1344,10 +1364,8 @@ function MembersModule({ user, setUser, members, setMembers, activities, setActi
 
   const handleDeleteMember = (id) => {
     if (window.confirm('このアカウントと、関連するすべての「活動記録」データを完全に削除しますか？\n（※この操作は元に戻せません）')) {
-      // 生徒データを削除
+      // 生徒データを削除（この後、AppのuseEffectが自動的にactivitiesも掃除してくれます）
       setMembers(prev => prev.filter(m => m.id !== id));
-      // 関連する活動記録データも削除
-      setActivities(prev => prev.filter(a => a.userId !== id));
     }
   };
 
@@ -1493,7 +1511,6 @@ function MembersModule({ user, setUser, members, setMembers, activities, setActi
                             {isTeacherAccount ? '生徒に変更' : '教師に変更'}
                           </button>
                           
-                          {/* 教師アカウントの場合は「データ書出し」と「卒部」ボタンを非表示にする */}
                           {!isTeacherAccount && (
                             <>
                               <button onClick={() => handleExportTextData(m)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-3 py-1.5 rounded-xl text-xs transition">テキスト出力</button>
