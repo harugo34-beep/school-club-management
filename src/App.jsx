@@ -22,18 +22,27 @@ try {
 
 export default function App() {
   const [user, setUser] = useState(null);
+  const [pendingAuthUser, setPendingAuthUser] = useState(null); // 新規登録待ちのユーザー情報
   const [authLoading, setAuthLoading] = useState(true);
 
   const [activeTab, setActiveTab] = useState('attendance');
   const schoolName = '部活動管理';
 
-  // 登録済みの教師（顧問）メールアドレス一覧（開発者初期アドレスを設定）
+  // 登録済みの教師（顧問）メールアドレス一覧
   const [teacherEmails, setTeacherEmails] = useState(() => {
     try {
-      const saved = localStorage.getItem('vn_teacherEmails');
-      return saved ? JSON.parse(saved) : ['goto638@g.chikuyogakuen.ed.jp','fujimoto530@365.chikuyogakuen.ed.jp', 'harugo34@gmail.com'];
+      const saved = localStorage.getItem('vn_teacherEmails_v2');
+      return saved ? JSON.parse(saved) : [
+        'goto638@g.chikuyogakuen.ed.jp',
+        'fujimoto530@365.chikuyogakuen.ed.jp',
+        'harugo34@gmail.com'
+      ];
     } catch (e) {
-      return ['goto638@g.chikuyogakuen.ed.jp','fujimoto530@365.chikuyogakuen.ed.jp', 'harugo34@gmail.com'];
+      return [
+        'goto638@g.chikuyogakuen.ed.jp',
+        'fujimoto530@365.chikuyogakuen.ed.jp',
+        'harugo34@gmail.com'
+      ];
     }
   });
 
@@ -127,36 +136,46 @@ export default function App() {
       if (firebaseUser) {
         const email = (firebaseUser.email || '').toLowerCase().trim();
         const currentTeacherList = teacherEmails.map(e => e.toLowerCase().trim());
-        
-        // 完全一致で教師アドレスリストに登録されている場合のみ『教師』、それ以外はすべて『生徒』
         const isTeacher = currentTeacherList.includes(email);
 
-        const loginUser = {
-          id: firebaseUser.uid,
-          name: firebaseUser.displayName || (isTeacher ? '顧問 先生' : '部員'),
-          email: firebaseUser.email || 'user@school.ed.jp',
-          role: isTeacher ? 'teacher' : 'student',
-          grade: isTeacher ? '-' : '1',
-          furigana: isTeacher ? 'こもん' : 'ぶいん'
-        };
-
-        setUser(loginUser);
-
-        // 新しい生徒がログインした場合、自動で部員リストに追加
-        if (!isTeacher) {
-          setMembers(prev => {
-            if (!prev.some(m => m.email?.toLowerCase() === email)) {
-              return [...prev, {
-                id: loginUser.id,
-                name: loginUser.name,
-                furigana: loginUser.furigana,
-                grade: loginUser.grade,
-                role: 'student',
-                email: loginUser.email
-              }];
-            }
-            return prev;
+        if (isTeacher) {
+          // 教師として登録されている場合はそのままログイン完了
+          setUser({
+            id: firebaseUser.uid,
+            name: firebaseUser.displayName || '顧問 先生',
+            email: email,
+            role: 'teacher',
+            grade: '-',
+            furigana: 'こもん'
           });
+        } else {
+          // 生徒の場合、すでにデータが存在するかチェックする
+          let currentMembers = [];
+          try {
+            const saved = localStorage.getItem('vn_members');
+            if (saved) currentMembers = JSON.parse(saved);
+          } catch(e) {}
+
+          const existingMember = currentMembers.find(m => m.email?.toLowerCase() === email);
+          
+          if (existingMember) {
+            // 既存の生徒はそのままログイン完了
+            setUser({
+              id: existingMember.id,
+              name: existingMember.name,
+              email: existingMember.email,
+              role: 'student',
+              grade: existingMember.grade,
+              furigana: existingMember.furigana
+            });
+          } else {
+            // 新規の生徒の場合は、登録画面へ進むための状態をセット
+            setPendingAuthUser({
+              id: firebaseUser.uid,
+              email: email,
+              defaultName: firebaseUser.displayName || ''
+            });
+          }
         }
       } else {
         const savedUser = localStorage.getItem('vn_user');
@@ -182,8 +201,9 @@ export default function App() {
   useEffect(() => { try { localStorage.setItem('vn_practiceMenus', JSON.stringify(practiceMenus)); } catch (e) {} }, [practiceMenus]);
   useEffect(() => { try { localStorage.setItem('vn_activities', JSON.stringify(activities)); } catch (e) {} }, [activities]);
   useEffect(() => { try { localStorage.setItem('vn_media', JSON.stringify(mediaList)); } catch (e) {} }, [mediaList]);
-  useEffect(() => { try { localStorage.setItem('vn_teacherEmails', JSON.stringify(teacherEmails)); } catch (e) {} }, [teacherEmails]);
+  useEffect(() => { try { localStorage.setItem('vn_teacherEmails_v2', JSON.stringify(teacherEmails)); } catch (e) {} }, [teacherEmails]);
 
+  // Googleログインまたはフォールバック
   const handleGoogleLogin = async () => {
     if (auth) {
       try {
@@ -195,31 +215,32 @@ export default function App() {
       }
     }
     
-    // フォールバック（手動入力ログイン）
+    // 【環境フォールバック】Popupが使えない環境用
     const email = prompt("Googleアカウントのメールアドレスを入力してください:", "student@school.ed.jp");
     if (!email) return;
     const cleanEmail = email.toLowerCase().trim();
     const isTeacher = teacherEmails.map(e => e.toLowerCase().trim()).includes(cleanEmail);
-    const name = prompt("氏名を入力してください:", isTeacher ? "顧問 先生" : "部員 花子");
-    const furigana = isTeacher ? "こもん せんせい" : "ぶいん はなこ";
-    const grade = isTeacher ? "-" : prompt("学年を入力してください (1〜3):", "1") || "1";
-
-    const newUser = {
-      id: 'usr_' + Date.now(),
-      name: name || (isTeacher ? "顧問 先生" : "部員 花子"),
-      email: email,
-      role: isTeacher ? 'teacher' : 'student',
-      grade,
-      furigana
-    };
-    setUser(newUser);
-    if (!isTeacher) {
-      setMembers(prev => {
-        if (!prev.some(m => m.email === email)) {
-          return [...prev, { id: newUser.id, name: newUser.name, furigana: newUser.furigana, grade: newUser.grade, role: 'student', email: newUser.email }];
-        }
-        return prev;
+    
+    if (isTeacher) {
+      setUser({
+        id: 'usr_' + Date.now(),
+        name: "顧問 先生",
+        email: cleanEmail,
+        role: 'teacher',
+        grade: '-',
+        furigana: 'こもん'
       });
+    } else {
+      const existingMember = members.find(m => m.email?.toLowerCase() === cleanEmail);
+      if (existingMember) {
+        setUser({ ...existingMember });
+      } else {
+        setPendingAuthUser({
+          id: 'usr_' + Date.now(),
+          email: cleanEmail,
+          defaultName: ""
+        });
+      }
     }
   };
 
@@ -228,7 +249,32 @@ export default function App() {
       try { await signOut(auth); } catch (e) {}
     }
     setUser(null);
+    setPendingAuthUser(null);
     localStorage.removeItem('vn_user');
+  };
+
+  // 新規生徒登録画面からの完了処理
+  const handleRegistrationComplete = (data) => {
+    const newUser = {
+      id: pendingAuthUser.id,
+      name: data.name,
+      email: pendingAuthUser.email,
+      role: 'student',
+      grade: data.grade,
+      furigana: data.furigana
+    };
+    
+    setMembers(prev => [...prev, newUser]);
+    setUser(newUser);
+    setPendingAuthUser(null);
+  };
+
+  // 新規生徒登録画面からのキャンセル処理
+  const handleRegistrationCancel = async () => {
+    if (auth) {
+      try { await signOut(auth); } catch (e) {}
+    }
+    setPendingAuthUser(null);
   };
 
   if (authLoading) {
@@ -239,6 +285,17 @@ export default function App() {
           <p className="text-sm font-bold text-slate-300">Google認証を確認中...</p>
         </div>
       </div>
+    );
+  }
+
+  // 新規生徒の場合、登録・確認画面を表示
+  if (pendingAuthUser) {
+    return (
+      <StudentRegistrationScreen 
+        pendingAuthUser={pendingAuthUser} 
+        onComplete={handleRegistrationComplete} 
+        onCancel={handleRegistrationCancel} 
+      />
     );
   }
 
@@ -321,6 +378,142 @@ export default function App() {
   );
 }
 
+// ======= 新規生徒登録・確認画面コンポーネント =======
+function StudentRegistrationScreen({ pendingAuthUser, onComplete, onCancel }) {
+  const [step, setStep] = useState('input'); // 'input' または 'confirm'
+  const [name, setName] = useState(pendingAuthUser.defaultName || '');
+  const [furigana, setFurigana] = useState('');
+  const [grade, setGrade] = useState('1'); // デフォルトは1年生
+
+  const handleNext = (e) => {
+    e.preventDefault();
+    if (!name.trim() || !furigana.trim()) {
+      alert("氏名とふりがなを入力してください。");
+      return;
+    }
+    setStep('confirm');
+  };
+
+  const handleSubmit = () => {
+    onComplete({
+      name: name.trim(),
+      furigana: furigana.trim(),
+      grade
+    });
+  };
+
+  return (
+    <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 px-4 py-8 font-sans">
+      <div className="bg-white p-6 sm:p-10 rounded-3xl shadow-2xl max-w-md w-full border border-slate-100 space-y-6 text-slate-800">
+        
+        <div className="text-center">
+          <div className="w-16 h-16 bg-indigo-600 rounded-3xl mx-auto flex items-center justify-center text-white text-3xl font-black shadow-lg shadow-indigo-500/30 mb-4">
+            👤
+          </div>
+          <h2 className="text-xl font-black text-slate-900 tracking-tight">新規生徒アカウント登録</h2>
+          <p className="text-xs text-slate-500 mt-1">{pendingAuthUser.email}</p>
+        </div>
+
+        {step === 'input' ? (
+          <form onSubmit={handleNext} className="space-y-4">
+            <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs p-3 rounded-xl font-bold">
+              初回ログインです。部活動用のアカウント情報を登録してください。
+            </div>
+            
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">学年 <span className="text-rose-500">*</span></label>
+              <select 
+                value={grade} 
+                onChange={(e) => setGrade(e.target.value)} 
+                className="w-full border-2 border-slate-200 rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:border-indigo-500 bg-white"
+              >
+                <option value="1">1年生</option>
+                <option value="2">2年生</option>
+                <option value="3">3年生</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">氏名 <span className="text-rose-500">*</span></label>
+              <input 
+                type="text" 
+                value={name} 
+                onChange={(e) => setName(e.target.value)} 
+                placeholder="例: 筑陽 太郎" 
+                required 
+                className="w-full border-2 border-slate-200 rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:border-indigo-500" 
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">ふりがな <span className="text-rose-500">*</span></label>
+              <input 
+                type="text" 
+                value={furigana} 
+                onChange={(e) => setFurigana(e.target.value)} 
+                placeholder="例: ちくよう たろう" 
+                required 
+                className="w-full border-2 border-slate-200 rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:border-indigo-500" 
+              />
+            </div>
+
+            <div className="pt-4 flex gap-3">
+              <button 
+                type="button" 
+                onClick={onCancel} 
+                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 rounded-xl text-sm transition"
+              >
+                キャンセル
+              </button>
+              <button 
+                type="submit" 
+                className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl text-sm shadow-md transition"
+              >
+                確認画面へ
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className="space-y-5">
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-3">
+              <div>
+                <p className="text-[10px] font-bold text-slate-400">学年</p>
+                <p className="text-sm font-black text-slate-900">{grade}年生</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-bold text-slate-400">氏名</p>
+                <p className="text-sm font-black text-slate-900">{name}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-bold text-slate-400">ふりがな</p>
+                <p className="text-sm font-black text-slate-900">{furigana}</p>
+              </div>
+            </div>
+
+            <p className="text-xs font-bold text-center text-slate-600">この内容で登録します。よろしいですか？</p>
+
+            <div className="pt-2 flex flex-col gap-2">
+              <button 
+                onClick={handleSubmit} 
+                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3.5 rounded-xl text-sm shadow-md transition"
+              >
+                ✅ この内容で登録してログイン
+              </button>
+              <button 
+                onClick={() => setStep('input')} 
+                className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 rounded-xl text-sm transition"
+              >
+                戻って修正する
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ======= ログイン画面 =======
 function LoginScreen({ onGoogleLogin, schoolName }) {
   return (
     <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 px-4 py-8">
@@ -1179,7 +1372,6 @@ function MembersModule({ user, setUser, members, setMembers, activities, teacher
 
   return (
     <div className="space-y-8">
-      {/* 1. 教師アカウント（顧問アドレス）管理パネル */}
       <div className="bg-gradient-to-r from-slate-900 to-indigo-950 text-white p-6 rounded-3xl shadow-lg border border-slate-800 space-y-4">
         <div className="flex items-center justify-between">
           <div>
@@ -1228,7 +1420,6 @@ function MembersModule({ user, setUser, members, setMembers, activities, teacher
         </div>
       </div>
 
-      {/* 2. 部員・アカウント一覧 */}
       <div className="bg-white p-4 sm:p-6 rounded-3xl shadow-sm border border-slate-100 space-y-4">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div><h2 className="text-lg sm:text-xl font-black text-slate-900">部員・登録アカウント一覧</h2></div>
