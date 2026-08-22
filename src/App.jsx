@@ -110,7 +110,6 @@ export default function App() {
     if (!db) return;
     const unsub = onSnapshot(collection(db, 'activities'), (snapshot) => {
       const list = snapshot.docs.map(doc => doc.data());
-      // 日付降順ソート
       list.sort((a, b) => b.id.localeCompare(a.id));
       setActivities(list);
     });
@@ -153,7 +152,7 @@ export default function App() {
             email: existingMember.email,
             role: isTeacher ? 'teacher' : 'student',
             grade: isTeacher ? '顧問' : existingMember.grade,
-            furigana: existingMember.furigana
+            furigana: isTeacher ? '' : existingMember.furigana
           });
         } else {
           // 未登録の場合は初回登録画面へ
@@ -201,7 +200,7 @@ export default function App() {
       email: pendingAuthUser.email,
       role: pendingAuthUser.isTeacher ? 'teacher' : 'student',
       grade: pendingAuthUser.isTeacher ? '顧問' : data.grade,
-      furigana: data.furigana
+      furigana: pendingAuthUser.isTeacher ? '' : data.furigana
     };
     
     // Firestoreに保存
@@ -325,8 +324,12 @@ function RegistrationScreen({ pendingAuthUser, onComplete, onCancel }) {
 
   const handleNext = (e) => {
     e.preventDefault();
-    if (!name.trim() || !furigana.trim()) {
-      alert("氏名とふりがなを入力してください。");
+    if (!name.trim()) {
+      alert("氏名を入力してください。");
+      return;
+    }
+    if (!pendingAuthUser.isTeacher && !furigana.trim()) {
+      alert("ふりがなを入力してください。");
       return;
     }
     setStep('confirm');
@@ -335,7 +338,7 @@ function RegistrationScreen({ pendingAuthUser, onComplete, onCancel }) {
   const handleSubmit = () => {
     onComplete({
       name: name.trim(),
-      furigana: furigana.trim(),
+      furigana: pendingAuthUser.isTeacher ? '' : furigana.trim(),
       grade: pendingAuthUser.isTeacher ? '顧問' : grade
     });
   };
@@ -381,23 +384,25 @@ function RegistrationScreen({ pendingAuthUser, onComplete, onCancel }) {
                 type="text" 
                 value={name} 
                 onChange={(e) => setName(e.target.value)} 
-                placeholder="例: 部活 たろう" 
+                placeholder={pendingAuthUser.isTeacher ? "例: 後藤 陽斗" : "例: 部活 たろう"} 
                 required 
                 className="w-full border-2 border-slate-200 rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:border-indigo-500" 
               />
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-600 mb-1">ふりがな <span className="text-rose-500">*</span></label>
-              <input 
-                type="text" 
-                value={furigana} 
-                onChange={(e) => setFurigana(e.target.value)} 
-                placeholder="例: ぶかつ たろう" 
-                required 
-                className="w-full border-2 border-slate-200 rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:border-indigo-500" 
-              />
-            </div>
+            {!pendingAuthUser.isTeacher && (
+              <div>
+                <label className="block text-xs font-bold text-slate-600 mb-1">ふりがな <span className="text-rose-500">*</span></label>
+                <input 
+                  type="text" 
+                  value={furigana} 
+                  onChange={(e) => setFurigana(e.target.value)} 
+                  placeholder="例: ぶかつ たろう" 
+                  required 
+                  className="w-full border-2 border-slate-200 rounded-xl px-4 py-2.5 text-sm font-bold focus:outline-none focus:border-indigo-500" 
+                />
+              </div>
+            )}
 
             <div className="pt-4 flex gap-3">
               <button 
@@ -426,10 +431,12 @@ function RegistrationScreen({ pendingAuthUser, onComplete, onCancel }) {
                 <p className="text-[10px] font-bold text-slate-400">氏名</p>
                 <p className="text-sm font-black text-slate-900">{name}</p>
               </div>
-              <div>
-                <p className="text-[10px] font-bold text-slate-400">ふりがな</p>
-                <p className="text-sm font-black text-slate-900">{furigana}</p>
-              </div>
+              {!pendingAuthUser.isTeacher && (
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400">ふりがな</p>
+                  <p className="text-sm font-black text-slate-900">{furigana}</p>
+                </div>
+              )}
             </div>
 
             <p className="text-xs font-bold text-center text-slate-600">この内容で登録します。よろしいですか？</p>
@@ -949,13 +956,33 @@ function ActivityModule({ user, members, activities, teacherEmails }) {
     await setDoc(doc(db, 'activities', act.id), { ...act, comment: commentText });
   };
 
-  const activeMembers = members.filter(m => {
-    const isTeacher = teacherEmails.map(e => e.toLowerCase()).includes(m.email?.toLowerCase());
-    const isGraduated = m.grade && m.grade.includes('卒業');
-    return !isTeacher && !isGraduated;
-  });
+  // 現役生徒（教師でもなく、卒業生でもない生徒）のリスト
+  const activeMembers = useMemo(() => {
+    return members.filter(m => {
+      const isTeacher = teacherEmails.map(e => e.toLowerCase()).includes(m.email?.toLowerCase());
+      const isGraduated = m.grade && m.grade.includes('卒業');
+      return !isTeacher && !isGraduated;
+    });
+  }, [members, teacherEmails]);
 
-  const displayedActivities = activities.filter(a => user.role === 'student' ? a.userId === user.id : (selectedStudentId === 'all' ? true : a.userId === selectedStudentId));
+  // 現役生徒のIDセット
+  const activeMemberIds = useMemo(() => {
+    return new Set(activeMembers.map(m => m.id));
+  }, [activeMembers]);
+
+  // 表示する活動記録（卒業生のデータは残したまま非表示にフィルタリング）
+  const displayedActivities = useMemo(() => {
+    return activities.filter(a => {
+      // 卒業生の活動記録は表示しない
+      if (!activeMemberIds.has(a.userId)) return false;
+
+      if (user.role === 'student') {
+        return a.userId === user.id;
+      } else {
+        return selectedStudentId === 'all' ? true : a.userId === selectedStudentId;
+      }
+    });
+  }, [activities, activeMemberIds, user, selectedStudentId]);
 
   return (
     <div className="space-y-6">
@@ -1297,7 +1324,7 @@ function MembersModule({ user, setUser, members, activities, teacherEmails }) {
       if (window.confirm(`「${targetMember.name}」を「教師・顧問」として登録しますか？`)) {
         const updatedEmails = [...teacherEmails, targetMember.email.toLowerCase()];
         await setDoc(doc(db, 'settings', 'teachers'), { emails: updatedEmails });
-        await setDoc(doc(db, 'members', targetMember.id), { ...targetMember, role: 'teacher', grade: '顧問' });
+        await setDoc(doc(db, 'members', targetMember.id), { ...targetMember, role: 'teacher', grade: '顧問', furigana: '' });
       }
     }
   };
@@ -1329,8 +1356,8 @@ function MembersModule({ user, setUser, members, activities, teacherEmails }) {
     const memberActivities = activities.filter(a => a.userId === member.id);
     
     let text = `【部活動 活動記録データ】\n`;
-    text += `氏名: ${member.name} (${member.furigana})\n`;
-    text += `学年: ${member.grade}年\n`;
+    text += `氏名: ${member.name} ${member.furigana ? `(${member.furigana})` : ''}\n`;
+    text += `区分: ${member.grade}\n`;
     text += `=================================\n\n`;
 
     if (memberActivities.length === 0) {
@@ -1422,7 +1449,7 @@ function MembersModule({ user, setUser, members, activities, teacherEmails }) {
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-xs font-extrabold text-slate-600">
                   <th className="p-4">学年・区分</th>
-                  <th className="p-4">氏名 (フリガナ)</th>
+                  <th className="p-4">氏名</th>
                   <th className="p-4">メールアドレス</th>
                   <th className="p-4">現在の権限</th>
                   <th className="p-4 text-right">操作・権限制御</th>
@@ -1450,7 +1477,9 @@ function MembersModule({ user, setUser, members, activities, teacherEmails }) {
                         </td>
                         <td className="p-4">
                           <div className="font-black text-slate-900">{m.name}</div>
-                          <div className="text-xs text-slate-400">{m.furigana}</div>
+                          {!isTeacherAccount && m.furigana && (
+                            <div className="text-xs text-slate-400">{m.furigana}</div>
+                          )}
                         </td>
                         <td className="p-4 text-xs font-medium text-slate-600">{m.email}</td>
                         <td className="p-4">
