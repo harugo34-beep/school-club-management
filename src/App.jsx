@@ -1284,12 +1284,25 @@ function TacticsModule() {
         </div>
 
         <div className="bg-white p-4 sm:p-6 rounded-3xl shadow-sm border border-slate-100 space-y-4">
-          <h3 className="text-sm font-black text-slate-900">選手・ポジション名編集</h3>
+          <h3 className="text-sm font-black text-slate-900">選手・背番号・ポジション名編集</h3>
           <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
             {players.map(p => (
               <div key={p.id} className="flex items-center gap-2 bg-slate-50 p-2.5 rounded-2xl border border-slate-100">
-                <span className={`w-7 h-7 rounded-full flex items-center justify-center font-black text-white text-xs ${p.team === 'us' ? 'bg-indigo-600' : 'bg-rose-600'}`}>{p.number}</span>
-                <input type="text" value={p.name} onChange={(e) => { const val = e.target.value; setPlayers(prev => prev.map(item => item.id === p.id ? { ...item, name: val } : item)); }} className="flex-1 border-2 border-slate-200 rounded-xl px-2.5 py-1 text-xs font-bold focus:outline-none focus:border-indigo-500 bg-white" />
+                <span className={`w-3 h-3 rounded-full shrink-0 ${p.team === 'us' ? 'bg-indigo-600' : 'bg-rose-600'}`}></span>
+                <input 
+                  type="text" 
+                  value={p.number} 
+                  onChange={(e) => { const val = e.target.value; setPlayers(prev => prev.map(item => item.id === p.id ? { ...item, number: val } : item)); }} 
+                  placeholder="番号"
+                  className="w-12 text-center border-2 border-slate-200 rounded-xl px-1 py-1 text-xs font-black focus:outline-none focus:border-indigo-500 bg-white" 
+                />
+                <input 
+                  type="text" 
+                  value={p.name} 
+                  onChange={(e) => { const val = e.target.value; setPlayers(prev => prev.map(item => item.id === p.id ? { ...item, name: val } : item)); }} 
+                  placeholder="名前・ポジション"
+                  className="flex-1 border-2 border-slate-200 rounded-xl px-2.5 py-1 text-xs font-bold focus:outline-none focus:border-indigo-500 bg-white" 
+                />
               </div>
             ))}
           </div>
