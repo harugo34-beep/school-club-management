@@ -26,7 +26,7 @@ try {
 
 const DEFAULT_TEACHER_EMAILS = [
   'goto638@g.chikuyogakuen.ed.jp',
-  'fujimoto530@365.chikuyogakuen.ed.jp',
+  'fujimoto530@g.chikuyogakuen.ed.jp',
 ];
 
 export default function App() {
