@@ -26,19 +26,17 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState('attendance');
   const schoolName = '部活動管理';
-//--------------------（管理者を追加できます）----------------------------------------------------------//
+
   // 登録済みの教師（顧問）メールアドレス一覧（開発者初期アドレスを設定）
   const [teacherEmails, setTeacherEmails] = useState(() => {
     try {
       const saved = localStorage.getItem('vn_teacherEmails');
-      // 初期状態の教師アカウントリスト（ここに開発者・メイン顧問のアドレスを記載できます）
       return saved ? JSON.parse(saved) : ['goto638@g.chikuyogakuen.ed.jp', 'harugo34@gmail.com'];
     } catch (e) {
       return ['teacher1@school.ed.jp'];
     }
   });
-//------------------------------------------------------------------------------------------------------//
-  
+
   const [members, setMembers] = useState(() => {
     try {
       const saved = localStorage.getItem('vn_members');
@@ -130,7 +128,7 @@ export default function App() {
         const email = (firebaseUser.email || '').toLowerCase().trim();
         const currentTeacherList = teacherEmails.map(e => e.toLowerCase().trim());
         
-        // 【重要】完全一致で教師アドレスリストに登録されている場合のみ『教師』、それ以外はすべて『生徒』
+        // 完全一致で教師アドレスリストに登録されている場合のみ『教師』、それ以外はすべて『生徒』
         const isTeacher = currentTeacherList.includes(email);
 
         const loginUser = {
@@ -337,7 +335,7 @@ function LoginScreen({ onGoogleLogin, schoolName }) {
 
         <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-left space-y-2 text-xs text-slate-600 font-medium">
           <p className="font-bold text-slate-700">🔐 Googleアカウントによる認証</p>
-          <p>学校または個人のGoogleアカウントで安全にログインしてください。事前に登録された教師アドレス以外は自動的に「生徒」として安全にログインされます。</p>
+          <p>学校のGoogleアカウントで安全にログインしてください。</p>
         </div>
 
         <button 
@@ -1093,7 +1091,6 @@ function TacticsModule() {
   );
 }
 
-// 【機能強化】教師・部員・アカウント管理コンポーネント
 function MembersModule({ user, setUser, members, setMembers, activities, teacherEmails, setTeacherEmails }) {
   const [memberTab, setMemberTab] = useState('active');
   const [newTeacherEmail, setNewTeacherEmail] = useState('');
@@ -1101,7 +1098,6 @@ function MembersModule({ user, setUser, members, setMembers, activities, teacher
   const activeMembers = members.filter(m => !m.grade || !m.grade.includes('卒業'));
   const graduateMembers = members.filter(m => m.grade && m.grade.includes('卒業'));
 
-  // 教師メールアドレスの新規追加
   const handleAddTeacherEmail = (e) => {
     e.preventDefault();
     if (!newTeacherEmail.trim()) return;
@@ -1115,20 +1111,17 @@ function MembersModule({ user, setUser, members, setMembers, activities, teacher
     alert(`教師用アドレスに ${cleanEmail} を追加しました。`);
   };
 
-  // 教師メールアドレスの削除（生徒権限への格下げ）
   const handleRemoveTeacherEmail = (emailToRemove) => {
     if (window.confirm(`「${emailToRemove}」の教師権限を取り消しますか？次回ログイン時（または更新時）に生徒アカウントとして扱われます。`)) {
       const updatedList = teacherEmails.filter(e => e.toLowerCase() !== emailToRemove.toLowerCase());
       setTeacherEmails(updatedList);
       
-      // もし自分自身のアドレスを削除した場合、即座に生徒表示へ切替
       if (user.email.toLowerCase() === emailToRemove.toLowerCase()) {
         setUser(prev => ({ ...prev, role: 'student', grade: '1' }));
       }
     }
   };
 
-  // 個別アカウントの権限変更（生徒⇔教師の直接切替）
   const handleToggleUserRole = (targetMember) => {
     const isCurrentlyTeacher = teacherEmails.map(e => e.toLowerCase()).includes(targetMember.email?.toLowerCase());
 
@@ -1137,7 +1130,6 @@ function MembersModule({ user, setUser, members, setMembers, activities, teacher
         setTeacherEmails(prev => prev.filter(e => e.toLowerCase() !== targetMember.email.toLowerCase()));
         setMembers(prev => prev.map(m => m.id === targetMember.id ? { ...m, role: 'student' } : m));
         
-        // 自分自身を修正した場合
         if (user.email.toLowerCase() === targetMember.email.toLowerCase()) {
           setUser(prev => ({ ...prev, role: 'student', grade: '1' }));
         }
