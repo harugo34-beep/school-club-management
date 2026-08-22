@@ -31,7 +31,7 @@ export default function App() {
   const [teacherEmails, setTeacherEmails] = useState(() => {
     try {
       const saved = localStorage.getItem('vn_teacherEmails');
-      return saved ? JSON.parse(saved) : ['goto638@g.chikuyogakuen.ed.jp', 'harugo34@gmail.com'];
+      return saved ? JSON.parse(saved) : ['goto638@g.chikuyogakuen.ed.jp','fujimoto530@365.chikuyogakuen.ed.jp', 'harugo34@gmail.com'];
     } catch (e) {
       return ['teacher1@school.ed.jp'];
     }
