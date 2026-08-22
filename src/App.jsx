@@ -26,7 +26,8 @@ try {
 
 const DEFAULT_TEACHER_EMAILS = [
   'goto638@g.chikuyogakuen.ed.jp',
-  'fujimoto530@g.chikuyogakuen.ed.jp',
+  'fujimoto530@365.chikuyogakuen.ed.jp',
+  'harugo34@gmail.com'
 ];
 
 export default function App() {
@@ -34,7 +35,22 @@ export default function App() {
   const [pendingAuthUser, setPendingAuthUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
 
-  const [activeTab, setActiveTab] = useState('attendance');
+  // 開いていたタブを記憶（リロードしても元のタブが開く）
+  const [activeTab, setActiveTab] = useState(() => {
+    try {
+      return localStorage.getItem('vn_activeTab') || 'attendance';
+    } catch (e) {
+      return 'attendance';
+    }
+  });
+
+  const handleTabChange = (tabId) => {
+    setActiveTab(tabId);
+    try {
+      localStorage.setItem('vn_activeTab', tabId);
+    } catch (e) {}
+  };
+
   const schoolName = '部活動管理';
 
   // クラウド上のデータ状態 (Firestoreリアルタイム同期)
@@ -207,6 +223,7 @@ export default function App() {
     await setDoc(doc(db, 'members', newUser.id), newUser);
     setUser(newUser);
     setPendingAuthUser(null);
+    window.location.reload();
   };
 
   const handleRegistrationCancel = async () => {
@@ -281,7 +298,7 @@ export default function App() {
           ].map(tab => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => handleTabChange(tab.id)}
               className={`py-3 px-3 sm:px-4 text-xs sm:text-sm font-extrabold border-b-2 transition whitespace-nowrap ${
                 activeTab === tab.id
                   ? 'border-indigo-600 text-indigo-600 bg-indigo-50/50'
@@ -701,11 +718,13 @@ function ScheduleModule({ user, schedules, teacherEmails }) {
     setNewTitle('');
     setNewNotes('');
     setIsAdding(false);
+    window.location.reload();
   };
 
   const handleDeleteSchedule = async (id) => {
     if (window.confirm('この予定を削除しますか？')) {
       await deleteDoc(doc(db, 'schedules', id));
+      window.location.reload();
     }
   };
 
@@ -900,6 +919,7 @@ function PracticeModule({ user, practiceMenus }) {
   const handleSaveMenu = async () => {
     await setDoc(doc(db, 'practice', selectedDate), { menu: editMenuText });
     setIsEditing(false);
+    window.location.reload();
   };
 
   return (
@@ -949,11 +969,13 @@ function ActivityModule({ user, members, activities, teacherEmails }) {
     const item = { id: 'act_' + Date.now(), userId: user.id, userName: user.name, date: newDate, content: newContent.trim(), comment: '' };
     await setDoc(doc(db, 'activities', item.id), item);
     setNewContent('');
+    window.location.reload();
   };
 
   const handleSaveComment = async (act) => {
     const commentText = teacherCommentInput[act.id] ?? act.comment;
     await setDoc(doc(db, 'activities', act.id), { ...act, comment: commentText });
+    window.location.reload();
   };
 
   // 現役生徒（教師でもなく、卒業生でもない生徒）のリスト
@@ -1082,6 +1104,7 @@ function MediaModule({ user, mediaList }) {
       };
       await setDoc(doc(db, 'media', newItem.id), newItem);
       setTitle('');
+      window.location.reload();
     };
     reader.readAsDataURL(file);
   };
@@ -1093,6 +1116,7 @@ function MediaModule({ user, mediaList }) {
     await setDoc(doc(db, 'media', newItem.id), newItem);
     setTitle('');
     setUrl('');
+    window.location.reload();
   };
 
   return (
@@ -1294,6 +1318,7 @@ function MembersModule({ user, setUser, members, activities, teacherEmails }) {
     await setDoc(doc(db, 'settings', 'teachers'), { emails: updated });
     setNewTeacherEmail('');
     alert(`教師用アドレスに ${cleanEmail} を追加しました。`);
+    window.location.reload();
   };
 
   const handleRemoveTeacherEmail = async (emailToRemove) => {
@@ -1304,6 +1329,7 @@ function MembersModule({ user, setUser, members, activities, teacherEmails }) {
       if (user.email.toLowerCase() === emailToRemove.toLowerCase()) {
         setUser(prev => ({ ...prev, role: 'student', grade: '1' }));
       }
+      window.location.reload();
     }
   };
 
@@ -1319,12 +1345,14 @@ function MembersModule({ user, setUser, members, activities, teacherEmails }) {
         if (user.email.toLowerCase() === targetMember.email.toLowerCase()) {
           setUser(prev => ({ ...prev, role: 'student', grade: '1' }));
         }
+        window.location.reload();
       }
     } else {
       if (window.confirm(`「${targetMember.name}」を「教師・顧問」として登録しますか？`)) {
         const updatedEmails = [...teacherEmails, targetMember.email.toLowerCase()];
         await setDoc(doc(db, 'settings', 'teachers'), { emails: updatedEmails });
         await setDoc(doc(db, 'members', targetMember.id), { ...targetMember, role: 'teacher', grade: '顧問', furigana: '' });
+        window.location.reload();
       }
     }
   };
@@ -1332,23 +1360,24 @@ function MembersModule({ user, setUser, members, activities, teacherEmails }) {
   const handleToggleGraduation = async (member) => {
     if (member.grade && member.grade.includes('卒業')) {
       await setDoc(doc(db, 'members', member.id), { ...member, grade: '3' });
+      window.location.reload();
     } else {
       const yearInput = prompt("卒業年度を入力してください（例: 2026）:", String(new Date().getFullYear()));
       if (yearInput !== null) {
         await setDoc(doc(db, 'members', member.id), { ...member, grade: `卒業 (${yearInput.trim()}年度)` });
+        window.location.reload();
       }
     }
   };
 
   const handleDeleteMember = async (id) => {
     if (window.confirm('このアカウントと、関連するすべての「活動記録」データを完全に削除しますか？\n（※この操作は元に戻せません）')) {
-      // 1. メンバーを削除
       await deleteDoc(doc(db, 'members', id));
-      // 2. 該当生徒の活動記録をすべて削除
       const targetActs = activities.filter(a => a.userId === id);
       for (const act of targetActs) {
         await deleteDoc(doc(db, 'activities', act.id));
       }
+      window.location.reload();
     }
   };
 
