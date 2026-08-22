@@ -26,23 +26,25 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState('attendance');
   const schoolName = '部活動管理';
-
+//--------------------（管理者を追加できます）----------------------------------------------------------//
+  // 登録済みの教師（顧問）メールアドレス一覧（開発者初期アドレスを設定）
   const [teacherEmails, setTeacherEmails] = useState(() => {
     try {
       const saved = localStorage.getItem('vn_teacherEmails');
-      return saved ? JSON.parse(saved) : ['teacher1@school.ed.jp', 'teacher2@school.ed.jp'];
+      // 初期状態の教師アカウントリスト（ここに開発者・メイン顧問のアドレスを記載できます）
+      return saved ? JSON.parse(saved) : ['goto638@g.chikuyogakuen.ed.jp', 'harugo34@gmail.com'];
     } catch (e) {
-      return ['teacher1@school.ed.jp', 'teacher2@school.ed.jp'];
+      return ['teacher1@school.ed.jp'];
     }
   });
-
+//------------------------------------------------------------------------------------------------------//
+  
   const [members, setMembers] = useState(() => {
     try {
       const saved = localStorage.getItem('vn_members');
       let initialMembers = saved ? JSON.parse(saved) : [
         { id: '1', name: '部員 太郎', furigana: 'ぶいん たろう', grade: '3', role: 'student', email: 'taro@school.ed.jp' },
         { id: '2', name: '佐藤 花子', furigana: 'さとう はなこ', grade: '2', role: 'student', email: 'hanako@school.ed.jp' },
-        { id: '3', name: '鈴木 健', furigana: 'すずき けん', grade: '1', role: 'student', email: 'ken@school.ed.jp' },
       ];
 
       const lastCheckYear = localStorage.getItem('vn_grade_check_year');
@@ -114,6 +116,7 @@ export default function App() {
     } catch (e) { return []; }
   });
 
+  // 認証状態の変更監視
   useEffect(() => {
     if (!auth) {
       setAuthLoading(false);
@@ -124,16 +127,39 @@ export default function App() {
 
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       if (firebaseUser) {
-        const email = firebaseUser.email || 'user@school.ed.jp';
-        const isTeacher = teacherEmails.includes(email) || email.includes('teacher');
-        setUser({
+        const email = (firebaseUser.email || '').toLowerCase().trim();
+        const currentTeacherList = teacherEmails.map(e => e.toLowerCase().trim());
+        
+        // 【重要】完全一致で教師アドレスリストに登録されている場合のみ『教師』、それ以外はすべて『生徒』
+        const isTeacher = currentTeacherList.includes(email);
+
+        const loginUser = {
           id: firebaseUser.uid,
-          name: firebaseUser.displayName || (isTeacher ? 'バレー部 顧問 先生' : '部員 太郎'),
-          email: email,
+          name: firebaseUser.displayName || (isTeacher ? '顧問 先生' : '部員'),
+          email: firebaseUser.email || 'user@school.ed.jp',
           role: isTeacher ? 'teacher' : 'student',
           grade: isTeacher ? '-' : '1',
-          furigana: isTeacher ? 'こもん' : 'ぶいん たろう'
-        });
+          furigana: isTeacher ? 'こもん' : 'ぶいん'
+        };
+
+        setUser(loginUser);
+
+        // 新しい生徒がログインした場合、自動で部員リストに追加
+        if (!isTeacher) {
+          setMembers(prev => {
+            if (!prev.some(m => m.email?.toLowerCase() === email)) {
+              return [...prev, {
+                id: loginUser.id,
+                name: loginUser.name,
+                furigana: loginUser.furigana,
+                grade: loginUser.grade,
+                role: 'student',
+                email: loginUser.email
+              }];
+            }
+            return prev;
+          });
+        }
       } else {
         const savedUser = localStorage.getItem('vn_user');
         if (savedUser) setUser(JSON.parse(savedUser));
@@ -170,9 +196,12 @@ export default function App() {
         console.warn("Popup sign-in error/fallback.", err);
       }
     }
+    
+    // フォールバック（手動入力ログイン）
     const email = prompt("Googleアカウントのメールアドレスを入力してください:", "student@school.ed.jp");
     if (!email) return;
-    const isTeacher = teacherEmails.includes(email) || email.includes('teacher');
+    const cleanEmail = email.toLowerCase().trim();
+    const isTeacher = teacherEmails.map(e => e.toLowerCase().trim()).includes(cleanEmail);
     const name = prompt("氏名を入力してください:", isTeacher ? "顧問 先生" : "部員 花子");
     const furigana = isTeacher ? "こもん せんせい" : "ぶいん はなこ";
     const grade = isTeacher ? "-" : prompt("学年を入力してください (1〜3):", "1") || "1";
@@ -254,7 +283,7 @@ export default function App() {
             { id: 'activity', label: '活動記録' },
             { id: 'media', label: '試合・練習の画像、動画' },
             { id: 'tactics', label: '戦術ボード' },
-            ...(user.role === 'teacher' ? [{ id: 'members', label: '部員・卒業生管理' }] : [])
+            ...(user.role === 'teacher' ? [{ id: 'members', label: '部員・アカウント管理' }] : [])
           ].map(tab => (
             <button
               key={tab.id}
@@ -278,7 +307,17 @@ export default function App() {
         {activeTab === 'activity' && <ActivityModule user={user} members={members} activities={activities} setActivities={setActivities} />}
         {activeTab === 'media' && <MediaModule user={user} mediaList={mediaList} setMediaList={setMediaList} />}
         {activeTab === 'tactics' && <TacticsModule />}
-        {activeTab === 'members' && user.role === 'teacher' && <MembersModule members={members} setMembers={setMembers} activities={activities} />}
+        {activeTab === 'members' && user.role === 'teacher' && (
+          <MembersModule 
+            user={user}
+            setUser={setUser}
+            members={members} 
+            setMembers={setMembers} 
+            activities={activities} 
+            teacherEmails={teacherEmails}
+            setTeacherEmails={setTeacherEmails}
+          />
+        )}
       </main>
     </div>
   );
@@ -298,7 +337,7 @@ function LoginScreen({ onGoogleLogin, schoolName }) {
 
         <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-left space-y-2 text-xs text-slate-600 font-medium">
           <p className="font-bold text-slate-700">🔐 Googleアカウントによる認証</p>
-          <p>学校または個人のGoogleアカウントで安全にログインしてください。メールアドレスを元に生徒・教師が自動判別されます。</p>
+          <p>学校または個人のGoogleアカウントで安全にログインしてください。事前に登録された教師アドレス以外は自動的に「生徒」として安全にログインされます。</p>
         </div>
 
         <button 
@@ -469,9 +508,6 @@ function ScheduleModule({ user, schedules, setSchedules, teacherEmails, setTeach
   const [newType, setNewType] = useState('practice');
   const [newLocation, setNewLocation] = useState('体育館');
   const [newNotes, setNewNotes] = useState('');
-  
-  const [isEditingEmails, setIsEditingEmails] = useState(false);
-  const [tempEmails, setTempEmails] = useState(teacherEmails.join(', '));
 
   const countdownList = useMemo(() => {
     const today = new Date();
@@ -536,14 +572,6 @@ function ScheduleModule({ user, schedules, setSchedules, teacherEmails, setTeach
         <div className="flex flex-wrap items-center gap-2">
           <div className="bg-indigo-50 text-indigo-800 text-xs font-bold px-3 py-2 rounded-xl border border-indigo-100 flex items-center gap-2">
             <span>顧問連絡先: {teacherEmails.join(', ')}</span>
-            {user.role === 'teacher' && (
-              <button 
-                onClick={() => { setTempEmails(teacherEmails.join(', ')); setIsEditingEmails(true); }}
-                className="bg-indigo-600 text-white text-[10px] px-2 py-0.5 rounded font-bold hover:bg-indigo-700"
-              >
-                変更
-              </button>
-            )}
           </div>
           {user.role === 'teacher' && (
             <button
@@ -709,22 +737,6 @@ function ScheduleModule({ user, schedules, setSchedules, teacherEmails, setTeach
                 <button type="button" onClick={() => setIsAdding(false)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 px-4 rounded-xl text-xs sm:text-sm">キャンセル</button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {isEditingEmails && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl space-y-4 text-slate-800">
-            <h3 className="font-extrabold text-lg text-slate-900">教師連絡先の編集</h3>
-            <div>
-              <label className="block text-xs font-bold text-slate-600 mb-1">メールアドレス (カンマ区切りで複数可):</label>
-              <input type="text" value={tempEmails} onChange={(e) => setTempEmails(e.target.value)} className="w-full border-2 border-slate-200 rounded-xl px-3 py-2 text-sm font-bold focus:outline-none focus:border-indigo-500" />
-            </div>
-            <div className="flex gap-2 pt-2">
-              <button onClick={() => { setTeacherEmails(tempEmails.split(',').map(s => s.trim()).filter(Boolean)); setIsEditingEmails(false); }} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs sm:text-sm shadow-md">保存する</button>
-              <button onClick={() => setIsEditingEmails(false)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 px-4 rounded-xl text-xs sm:text-sm">キャンセル</button>
-            </div>
           </div>
         </div>
       )}
@@ -1081,11 +1093,62 @@ function TacticsModule() {
   );
 }
 
-function MembersModule({ members, setMembers, activities }) {
+// 【機能強化】教師・部員・アカウント管理コンポーネント
+function MembersModule({ user, setUser, members, setMembers, activities, teacherEmails, setTeacherEmails }) {
   const [memberTab, setMemberTab] = useState('active');
+  const [newTeacherEmail, setNewTeacherEmail] = useState('');
 
   const activeMembers = members.filter(m => !m.grade || !m.grade.includes('卒業'));
   const graduateMembers = members.filter(m => m.grade && m.grade.includes('卒業'));
+
+  // 教師メールアドレスの新規追加
+  const handleAddTeacherEmail = (e) => {
+    e.preventDefault();
+    if (!newTeacherEmail.trim()) return;
+    const cleanEmail = newTeacherEmail.toLowerCase().trim();
+    if (teacherEmails.map(e => e.toLowerCase()).includes(cleanEmail)) {
+      alert("このメールアドレスは既に教師として登録されています。");
+      return;
+    }
+    setTeacherEmails(prev => [...prev, cleanEmail]);
+    setNewTeacherEmail('');
+    alert(`教師用アドレスに ${cleanEmail} を追加しました。`);
+  };
+
+  // 教師メールアドレスの削除（生徒権限への格下げ）
+  const handleRemoveTeacherEmail = (emailToRemove) => {
+    if (window.confirm(`「${emailToRemove}」の教師権限を取り消しますか？次回ログイン時（または更新時）に生徒アカウントとして扱われます。`)) {
+      const updatedList = teacherEmails.filter(e => e.toLowerCase() !== emailToRemove.toLowerCase());
+      setTeacherEmails(updatedList);
+      
+      // もし自分自身のアドレスを削除した場合、即座に生徒表示へ切替
+      if (user.email.toLowerCase() === emailToRemove.toLowerCase()) {
+        setUser(prev => ({ ...prev, role: 'student', grade: '1' }));
+      }
+    }
+  };
+
+  // 個別アカウントの権限変更（生徒⇔教師の直接切替）
+  const handleToggleUserRole = (targetMember) => {
+    const isCurrentlyTeacher = teacherEmails.map(e => e.toLowerCase()).includes(targetMember.email?.toLowerCase());
+
+    if (isCurrentlyTeacher) {
+      if (window.confirm(`「${targetMember.name} (${targetMember.email})」の教師権限を剥奪して「生徒」に変更しますか？`)) {
+        setTeacherEmails(prev => prev.filter(e => e.toLowerCase() !== targetMember.email.toLowerCase()));
+        setMembers(prev => prev.map(m => m.id === targetMember.id ? { ...m, role: 'student' } : m));
+        
+        // 自分自身を修正した場合
+        if (user.email.toLowerCase() === targetMember.email.toLowerCase()) {
+          setUser(prev => ({ ...prev, role: 'student', grade: '1' }));
+        }
+      }
+    } else {
+      if (window.confirm(`「${targetMember.name} (${targetMember.email})」を「教師・顧問」として登録しますか？`)) {
+        setTeacherEmails(prev => [...prev, targetMember.email.toLowerCase()]);
+        setMembers(prev => prev.map(m => m.id === targetMember.id ? { ...m, role: 'teacher' } : m));
+      }
+    }
+  };
 
   const handleToggleGraduation = (id) => {
     setMembers(prev => prev.map(m => {
@@ -1123,62 +1186,124 @@ function MembersModule({ members, setMembers, activities }) {
   const displayedMembersList = memberTab === 'active' ? activeMembers : graduateMembers;
 
   return (
-    <div className="space-y-6">
-      <div className="bg-white p-4 sm:p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div><h2 className="text-lg sm:text-xl font-black text-slate-900">部員・卒業生管理</h2></div>
-        <div className="flex bg-slate-100 p-1 rounded-2xl">
-          <button onClick={() => setMemberTab('active')} className={`py-2 px-4 text-xs font-extrabold rounded-xl transition ${memberTab === 'active' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}>現役部員 ({activeMembers.length})</button>
-          <button onClick={() => setMemberTab('graduates')} className={`py-2 px-4 text-xs font-extrabold rounded-xl transition ${memberTab === 'graduates' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}>OB・卒業生 ({graduateMembers.length})</button>
+    <div className="space-y-8">
+      {/* 1. 教師アカウント（顧問アドレス）管理パネル */}
+      <div className="bg-gradient-to-r from-slate-900 to-indigo-950 text-white p-6 rounded-3xl shadow-lg border border-slate-800 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-base sm:text-lg font-black flex items-center gap-2">
+              <span>🛡️</span> 教師（顧問）権限アカウントの管理
+            </h3>
+            <p className="text-xs text-slate-300 mt-1">
+              ここに登録されたGoogleアカウントのみが教師（管理者）としてログインできます。
+            </p>
+          </div>
+        </div>
+
+        <form onSubmit={handleAddTeacherEmail} className="flex flex-col sm:flex-row gap-2 pt-2">
+          <input 
+            type="email"
+            value={newTeacherEmail}
+            onChange={(e) => setNewTeacherEmail(e.target.value)}
+            placeholder="追加する教師のGoogleメールアドレス (例: teacher@school.ed.jp)"
+            className="flex-1 px-4 py-2.5 rounded-xl text-xs font-bold bg-white/10 text-white placeholder-slate-400 border border-white/20 focus:outline-none focus:border-indigo-400"
+          />
+          <button 
+            type="submit"
+            className="bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold px-5 py-2.5 rounded-xl text-xs shadow transition whitespace-nowrap"
+          >
+            + 教師アドレスを追加
+          </button>
+        </form>
+
+        <div className="pt-3 border-t border-white/10">
+          <p className="text-xs font-bold text-slate-300 mb-2">現在登録済みの教師アドレス:</p>
+          <div className="flex flex-wrap gap-2">
+            {teacherEmails.map((email) => (
+              <div key={email} className="bg-white/10 border border-white/15 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2">
+                <span>{email}</span>
+                <button 
+                  type="button" 
+                  onClick={() => handleRemoveTeacherEmail(email)}
+                  className="text-rose-400 hover:text-rose-300 font-extrabold ml-1"
+                  title="教師権限を削除"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
-      <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 text-xs font-extrabold text-slate-600">
-                <th className="p-4">学年・卒業年度</th>
-                <th className="p-4">氏名 (フリガナ)</th>
-                <th className="p-4">メールアドレス</th>
-                <th className="p-4">ステータス</th>
-                <th className="p-4 text-right">操作</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-sm">
-              {displayedMembersList.length === 0 ? (
-                <tr>
-                  <td colSpan="5" className="p-8 text-center text-slate-400 font-bold text-xs">部員データはありません。</td>
+      {/* 2. 部員・アカウント一覧 */}
+      <div className="bg-white p-4 sm:p-6 rounded-3xl shadow-sm border border-slate-100 space-y-4">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div><h2 className="text-lg sm:text-xl font-black text-slate-900">部員・登録アカウント一覧</h2></div>
+          <div className="flex bg-slate-100 p-1 rounded-2xl">
+            <button onClick={() => setMemberTab('active')} className={`py-2 px-4 text-xs font-extrabold rounded-xl transition ${memberTab === 'active' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}>現役部員 ({activeMembers.length})</button>
+            <button onClick={() => setMemberTab('graduates')} className={`py-2 px-4 text-xs font-extrabold rounded-xl transition ${memberTab === 'graduates' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}>OB・卒業生 ({graduateMembers.length})</button>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-100 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200 text-xs font-extrabold text-slate-600">
+                  <th className="p-4">学年・区分</th>
+                  <th className="p-4">氏名 (フリガナ)</th>
+                  <th className="p-4">メールアドレス</th>
+                  <th className="p-4">現在の権限</th>
+                  <th className="p-4 text-right">操作・権限制御</th>
                 </tr>
-              ) : (
-                displayedMembersList.map(m => (
-                  <tr key={m.id} className="hover:bg-slate-50/50 transition">
-                    <td className="p-4 font-bold text-slate-900">
-                      <span className={`inline-block px-3 py-1 rounded-xl text-xs font-bold ${m.grade && m.grade.includes('卒業') ? 'bg-slate-200 text-slate-700' : 'bg-emerald-100 text-emerald-800'}`}>
-                        {m.grade && m.grade.includes('卒業') ? m.grade : `${m.grade}年`}
-                      </span>
-                    </td>
-                    <td className="p-4">
-                      <div className="font-black text-slate-900">{m.name}</div>
-                      <div className="text-xs text-slate-400">{m.furigana}</div>
-                    </td>
-                    <td className="p-4 text-xs font-medium text-slate-600">{m.email}</td>
-                    <td className="p-4">
-                      <span className={`inline-block px-3 py-1 rounded-xl text-xs font-bold ${m.grade && m.grade.includes('卒業') ? 'bg-slate-200 text-slate-700' : 'bg-emerald-100 text-emerald-800'}`}>
-                        {m.grade && m.grade.includes('卒業') ? '卒部・OBOG' : '現役部員'}
-                      </span>
-                    </td>
-                    <td className="p-4 text-right space-x-2">
-                      <button onClick={() => handleExportData(m)} className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold px-3 py-1.5 rounded-xl text-xs transition">データ書出し</button>
-                      <button onClick={() => handleToggleGraduation(m.id)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-3 py-1.5 rounded-xl text-xs transition">
-                        {m.grade && m.grade.includes('卒業') ? '現役復帰' : '卒部にする'}
-                      </button>
-                      <button onClick={() => handleDeleteMember(m.id)} className="text-rose-500 hover:text-rose-700 font-bold text-xs p-1.5">削除</button>
-                    </td>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-sm">
+                {displayedMembersList.length === 0 ? (
+                  <tr>
+                    <td colSpan="5" className="p-8 text-center text-slate-400 font-bold text-xs">部員データはありません。</td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  displayedMembersList.map(m => {
+                    const isTeacherAccount = teacherEmails.map(e => e.toLowerCase()).includes(m.email?.toLowerCase());
+
+                    return (
+                      <tr key={m.id} className="hover:bg-slate-50/50 transition">
+                        <td className="p-4 font-bold text-slate-900">
+                          <span className={`inline-block px-3 py-1 rounded-xl text-xs font-bold ${m.grade && m.grade.includes('卒業') ? 'bg-slate-200 text-slate-700' : 'bg-emerald-100 text-emerald-800'}`}>
+                            {m.grade && m.grade.includes('卒業') ? m.grade : `${m.grade}年`}
+                          </span>
+                        </td>
+                        <td className="p-4">
+                          <div className="font-black text-slate-900">{m.name}</div>
+                          <div className="text-xs text-slate-400">{m.furigana}</div>
+                        </td>
+                        <td className="p-4 text-xs font-medium text-slate-600">{m.email}</td>
+                        <td className="p-4">
+                          <span className={`inline-block px-3 py-1 rounded-xl text-xs font-bold ${isTeacherAccount ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700'}`}>
+                            {isTeacherAccount ? '教師・顧問' : '生徒'}
+                          </span>
+                        </td>
+                        <td className="p-4 text-right space-x-2">
+                          <button 
+                            onClick={() => handleToggleUserRole(m)} 
+                            className={`font-bold px-3 py-1.5 rounded-xl text-xs transition ${isTeacherAccount ? 'bg-amber-100 hover:bg-amber-200 text-amber-900' : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700'}`}
+                          >
+                            {isTeacherAccount ? '生徒に変更 (権限剥奪)' : '教師に変更'}
+                          </button>
+                          <button onClick={() => handleExportData(m)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-3 py-1.5 rounded-xl text-xs transition">データ書出し</button>
+                          <button onClick={() => handleToggleGraduation(m.id)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-3 py-1.5 rounded-xl text-xs transition">
+                            {m.grade && m.grade.includes('卒業') ? '現役復帰' : '卒部にする'}
+                          </button>
+                          <button onClick={() => handleDeleteMember(m.id)} className="text-rose-500 hover:text-rose-700 font-bold text-xs p-1.5">削除</button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
