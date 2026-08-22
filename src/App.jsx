@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from 'firebase/auth';
+import { 
+  getFirestore, collection, doc, setDoc, getDoc, onSnapshot, deleteDoc 
+} from 'firebase/firestore';
 
 // Firebase設定値
 const firebaseConfig = {
@@ -12,151 +15,138 @@ const firebaseConfig = {
   appId: "1:528860396983:web:7421c10fc0f95cbfa33c32"
 };
 
-let app, auth;
+let app, auth, db;
 try {
   app = initializeApp(firebaseConfig);
   auth = getAuth(app);
+  db = getFirestore(app);
 } catch (e) {
-  console.log("Firebase initialization fallback.");
+  console.log("Firebase initialization fallback.", e);
 }
+
+const DEFAULT_TEACHER_EMAILS = [
+  'goto638@g.chikuyogakuen.ed.jp',
+  'fujimoto530@365.chikuyogakuen.ed.jp',
+];
 
 export default function App() {
   const [user, setUser] = useState(null);
-  const [pendingAuthUser, setPendingAuthUser] = useState(null); // 新規登録待ちのユーザー情報
+  const [pendingAuthUser, setPendingAuthUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
 
   const [activeTab, setActiveTab] = useState('attendance');
   const schoolName = '部活動管理';
 
-  // 登録済みの教師（顧問）メールアドレス一覧
-  const [teacherEmails, setTeacherEmails] = useState(() => {
-    try {
-      const saved = localStorage.getItem('vn_teacherEmails_v2');
-      return saved ? JSON.parse(saved) : [
-        'goto638@g.chikuyogakuen.ed.jp',
-        'fujimoto530@365.chikuyogakuen.ed.jp',
-       
-      ];
-    } catch (e) {
-      return [
-        'goto638@g.chikuyogakuen.ed.jp',
-        'fujimoto530@365.chikuyogakuen.ed.jp',
-       
-      ];
-    }
-  });
+  // クラウド上のデータ状態 (Firestoreリアルタイム同期)
+  const [teacherEmails, setTeacherEmails] = useState(DEFAULT_TEACHER_EMAILS);
+  const [members, setMembers] = useState([]);
+  const [attendance, setAttendance] = useState({});
+  const [schedules, setSchedules] = useState([]);
+  const [practiceMenus, setPracticeMenus] = useState({});
+  const [activities, setActivities] = useState([]);
+  const [mediaList, setMediaList] = useState([]);
 
-  // 部員データ（プレビュー用データを完全に削除）
-  const [members, setMembers] = useState(() => {
-    try {
-      const saved = localStorage.getItem('vn_members');
-      let initialMembers = saved ? JSON.parse(saved) : [];
-
-      const lastCheckYear = localStorage.getItem('vn_grade_check_year');
-      const now = new Date();
-      const currentYear = now.getFullYear();
-      const isAprilFirstOrLater = (now.getMonth() === 3 && now.getDate() >= 1) || now.getMonth() > 3;
-      
-      if (lastCheckYear !== String(currentYear) && isAprilFirstOrLater) {
-        initialMembers = initialMembers.map(m => {
-          let g = parseInt(m.grade, 10);
-          if (!isNaN(g)) {
-            if (g === 3) {
-              return { ...m, grade: `卒業 (${currentYear - 1}年度卒業)` };
-            } else if (g === 2) {
-              return { ...m, grade: '3' };
-            } else if (g === 1) {
-              return { ...m, grade: '2' };
-            }
-          }
-          return m;
-        });
-        localStorage.setItem('vn_grade_check_year', String(currentYear));
-      }
-      return initialMembers;
-    } catch (e) {
-      return [];
-    }
-  });
-
-  const [attendance, setAttendance] = useState(() => {
-    try {
-      const saved = localStorage.getItem('vn_attendance');
-      return saved ? JSON.parse(saved) : {};
-    } catch (e) { return {}; }
-  });
-
-  // スケジュール（プレビュー用データを削除）
-  const [schedules, setSchedules] = useState(() => {
-    try {
-      const saved = localStorage.getItem('vn_schedules');
-      return saved ? JSON.parse(saved) : [];
-    } catch (e) { return []; }
-  });
-
-  // 練習メニュー（プレビュー用データを削除）
-  const [practiceMenus, setPracticeMenus] = useState(() => {
-    try {
-      const saved = localStorage.getItem('vn_practiceMenus');
-      return saved ? JSON.parse(saved) : {};
-    } catch (e) { return {}; }
-  });
-
-  // 活動記録（プレビュー用データを削除）
-  const [activities, setActivities] = useState(() => {
-    try {
-      const saved = localStorage.getItem('vn_activities');
-      return saved ? JSON.parse(saved) : [];
-    } catch (e) { return []; }
-  });
-
-  const [mediaList, setMediaList] = useState(() => {
-    try {
-      const saved = localStorage.getItem('vn_media');
-      return saved ? JSON.parse(saved) : [];
-    } catch (e) { return []; }
-  });
-
-  // ==========================================
-  // 【重要】メンバーが削除されたら、連動して過去の活動記録も自動で一掃（パージ）する処理
-  // すでに残ってしまっている「部員太郎」等の不要なデータもここで消去されます。
-  // ==========================================
+  // 1. 教師メールアドレス一覧のクラウド同期
   useEffect(() => {
-    setActivities(prev => {
-      // 現在の members に存在しているユーザーの活動記録だけを残す
-      const validActivities = prev.filter(a => members.some(m => m.id === a.userId));
-      if (validActivities.length !== prev.length) {
-        return validActivities;
+    if (!db) return;
+    const unsub = onSnapshot(doc(db, 'settings', 'teachers'), (docSnap) => {
+      if (docSnap.exists()) {
+        setTeacherEmails(docSnap.data().emails || DEFAULT_TEACHER_EMAILS);
+      } else {
+        setDoc(doc(db, 'settings', 'teachers'), { emails: DEFAULT_TEACHER_EMAILS });
       }
-      return prev;
     });
-  }, [members]);
+    return () => unsub();
+  }, []);
 
-  // 認証状態の変更監視
+  // 2. 部員（メンバー）データのクラウド同期
+  useEffect(() => {
+    if (!db) return;
+    const unsub = onSnapshot(collection(db, 'members'), (snapshot) => {
+      const list = snapshot.docs.map(doc => doc.data());
+      setMembers(list);
+    });
+    return () => unsub();
+  }, []);
+
+  // 3. 出欠データのクラウド同期
+  useEffect(() => {
+    if (!db) return;
+    const unsub = onSnapshot(collection(db, 'attendance'), (snapshot) => {
+      const attMap = {};
+      snapshot.docs.forEach(doc => {
+        attMap[doc.id] = doc.data();
+      });
+      setAttendance(attMap);
+    });
+    return () => unsub();
+  }, []);
+
+  // 4. 予定表のクラウド同期
+  useEffect(() => {
+    if (!db) return;
+    const unsub = onSnapshot(collection(db, 'schedules'), (snapshot) => {
+      const list = snapshot.docs.map(doc => doc.data());
+      setSchedules(list);
+    });
+    return () => unsub();
+  }, []);
+
+  // 5. 練習メニューのクラウド同期
+  useEffect(() => {
+    if (!db) return;
+    const unsub = onSnapshot(collection(db, 'practice'), (snapshot) => {
+      const menuMap = {};
+      snapshot.docs.forEach(doc => {
+        menuMap[doc.id] = doc.data();
+      });
+      setPracticeMenus(menuMap);
+    });
+    return () => unsub();
+  }, []);
+
+  // 6. 活動記録のクラウド同期
+  useEffect(() => {
+    if (!db) return;
+    const unsub = onSnapshot(collection(db, 'activities'), (snapshot) => {
+      const list = snapshot.docs.map(doc => doc.data());
+      // 日付降順ソート
+      list.sort((a, b) => b.id.localeCompare(a.id));
+      setActivities(list);
+    });
+    return () => unsub();
+  }, []);
+
+  // 7. メディアのクラウド同期
+  useEffect(() => {
+    if (!db) return;
+    const unsub = onSnapshot(collection(db, 'media'), (snapshot) => {
+      const list = snapshot.docs.map(doc => doc.data());
+      list.sort((a, b) => b.id.localeCompare(a.id));
+      setMediaList(list);
+    });
+    return () => unsub();
+  }, []);
+
+  // 認証状態監視
   useEffect(() => {
     if (!auth) {
       setAuthLoading(false);
-      const savedUser = localStorage.getItem('vn_user');
-      if (savedUser) setUser(JSON.parse(savedUser));
       return;
     }
 
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         const email = (firebaseUser.email || '').toLowerCase().trim();
         const currentTeacherList = teacherEmails.map(e => e.toLowerCase().trim());
         const isTeacher = currentTeacherList.includes(email);
 
-        let currentMembers = [];
-        try {
-          const saved = localStorage.getItem('vn_members');
-          if (saved) currentMembers = JSON.parse(saved);
-        } catch(e) {}
+        // Firestoreからユーザー情報の存在確認
+        const userDocRef = doc(db, 'members', firebaseUser.uid);
+        const userSnap = await getDoc(userDocRef);
 
-        const existingMember = currentMembers.find(m => m.email?.toLowerCase() === email);
-        
-        if (existingMember) {
-          // すでに登録済みのユーザー（教師・生徒問わず）
+        if (userSnap.exists()) {
+          const existingMember = userSnap.data();
           setUser({
             id: existingMember.id,
             name: existingMember.name,
@@ -166,7 +156,7 @@ export default function App() {
             furigana: existingMember.furigana
           });
         } else {
-          // 未登録の場合は、登録画面へ進むための状態をセット（教師も生徒も対象）
+          // 未登録の場合は初回登録画面へ
           setPendingAuthUser({
             id: firebaseUser.uid,
             email: email,
@@ -174,8 +164,7 @@ export default function App() {
           });
         }
       } else {
-        const savedUser = localStorage.getItem('vn_user');
-        if (savedUser) setUser(JSON.parse(savedUser));
+        setUser(null);
       }
       setAuthLoading(false);
     });
@@ -183,23 +172,7 @@ export default function App() {
     return () => unsubscribe();
   }, [teacherEmails]);
 
-  useEffect(() => { 
-    if (user) {
-      try { localStorage.setItem('vn_user', JSON.stringify(user)); } catch (e) {}
-    } else {
-      try { localStorage.removeItem('vn_user'); } catch (e) {}
-    }
-  }, [user]);
-
-  useEffect(() => { try { localStorage.setItem('vn_members', JSON.stringify(members)); } catch (e) {} }, [members]);
-  useEffect(() => { try { localStorage.setItem('vn_attendance', JSON.stringify(attendance)); } catch (e) {} }, [attendance]);
-  useEffect(() => { try { localStorage.setItem('vn_schedules', JSON.stringify(schedules)); } catch (e) {} }, [schedules]);
-  useEffect(() => { try { localStorage.setItem('vn_practiceMenus', JSON.stringify(practiceMenus)); } catch (e) {} }, [practiceMenus]);
-  useEffect(() => { try { localStorage.setItem('vn_activities', JSON.stringify(activities)); } catch (e) {} }, [activities]);
-  useEffect(() => { try { localStorage.setItem('vn_media', JSON.stringify(mediaList)); } catch (e) {} }, [mediaList]);
-  useEffect(() => { try { localStorage.setItem('vn_teacherEmails_v2', JSON.stringify(teacherEmails)); } catch (e) {} }, [teacherEmails]);
-
-  // Googleログインまたはフォールバック
+  // Googleログイン
   const handleGoogleLogin = async () => {
     if (auth) {
       try {
@@ -210,27 +183,6 @@ export default function App() {
         console.warn("Popup sign-in error/fallback.", err);
       }
     }
-    
-    // 【環境フォールバック】Popupが使えない環境用
-    const email = prompt("Googleアカウントのメールアドレスを入力してください:", "student@school.ed.jp");
-    if (!email) return;
-    const cleanEmail = email.toLowerCase().trim();
-    const isTeacher = teacherEmails.map(e => e.toLowerCase().trim()).includes(cleanEmail);
-    const existingMember = members.find(m => m.email?.toLowerCase() === cleanEmail);
-
-    if (existingMember) {
-      setUser({
-        ...existingMember,
-        role: isTeacher ? 'teacher' : 'student',
-        grade: isTeacher ? '顧問' : existingMember.grade
-      });
-    } else {
-      setPendingAuthUser({
-        id: 'usr_' + Date.now(),
-        email: cleanEmail,
-        isTeacher: isTeacher
-      });
-    }
   };
 
   const handleLogout = async () => {
@@ -239,11 +191,10 @@ export default function App() {
     }
     setUser(null);
     setPendingAuthUser(null);
-    localStorage.removeItem('vn_user');
   };
 
-  // 新規登録画面からの完了処理（生徒・教師共通）
-  const handleRegistrationComplete = (data) => {
+  // 新規登録完了処理（クラウドへ保存）
+  const handleRegistrationComplete = async (data) => {
     const newUser = {
       id: pendingAuthUser.id,
       name: data.name,
@@ -253,7 +204,8 @@ export default function App() {
       furigana: data.furigana
     };
     
-    setMembers(prev => [...prev, newUser]);
+    // Firestoreに保存
+    await setDoc(doc(db, 'members', newUser.id), newUser);
     setUser(newUser);
     setPendingAuthUser(null);
   };
@@ -270,13 +222,13 @@ export default function App() {
       <div className="flex items-center justify-center min-h-screen bg-slate-900 text-white">
         <div className="text-center space-y-3">
           <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
-          <p className="text-sm font-bold text-slate-300">Google認証を確認中...</p>
+          <p className="text-sm font-bold text-slate-300">クラウドデータ同期中...</p>
         </div>
       </div>
     );
   }
 
-  // 新規ユーザー（教師・生徒）の場合、登録・確認画面を表示
+  // 新規ユーザー登録画面
   if (pendingAuthUser) {
     return (
       <RegistrationScreen 
@@ -344,22 +296,19 @@ export default function App() {
       </nav>
 
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 overflow-y-auto">
-        {activeTab === 'attendance' && <AttendanceModule user={user} members={members} attendance={attendance} setAttendance={setAttendance} teacherEmails={teacherEmails} />}
-        {activeTab === 'schedule' && <ScheduleModule user={user} schedules={schedules} setSchedules={setSchedules} teacherEmails={teacherEmails} setTeacherEmails={setTeacherEmails} />}
-        {activeTab === 'practice' && <PracticeModule user={user} practiceMenus={practiceMenus} setPracticeMenus={setPracticeMenus} />}
-        {activeTab === 'activity' && <ActivityModule user={user} members={members} activities={activities} setActivities={setActivities} teacherEmails={teacherEmails} />}
-        {activeTab === 'media' && <MediaModule user={user} mediaList={mediaList} setMediaList={setMediaList} />}
+        {activeTab === 'attendance' && <AttendanceModule user={user} members={members} attendance={attendance} teacherEmails={teacherEmails} />}
+        {activeTab === 'schedule' && <ScheduleModule user={user} schedules={schedules} teacherEmails={teacherEmails} />}
+        {activeTab === 'practice' && <PracticeModule user={user} practiceMenus={practiceMenus} />}
+        {activeTab === 'activity' && <ActivityModule user={user} members={members} activities={activities} teacherEmails={teacherEmails} />}
+        {activeTab === 'media' && <MediaModule user={user} mediaList={mediaList} />}
         {activeTab === 'tactics' && <TacticsModule />}
         {activeTab === 'members' && user.role === 'teacher' && (
           <MembersModule 
             user={user}
             setUser={setUser}
             members={members} 
-            setMembers={setMembers} 
             activities={activities} 
-            setActivities={setActivities}
             teacherEmails={teacherEmails}
-            setTeacherEmails={setTeacherEmails}
           />
         )}
       </main>
@@ -369,11 +318,10 @@ export default function App() {
 
 // ======= 新規アカウント登録・確認画面コンポーネント =======
 function RegistrationScreen({ pendingAuthUser, onComplete, onCancel }) {
-  const [step, setStep] = useState('input'); // 'input' または 'confirm'
-  // 教師も生徒も、最初は名前を空にして手入力させる
+  const [step, setStep] = useState('input');
   const [name, setName] = useState('');
   const [furigana, setFurigana] = useState('');
-  const [grade, setGrade] = useState('1'); // 教師の場合は使用されない
+  const [grade, setGrade] = useState('1');
 
   const handleNext = (e) => {
     e.preventDefault();
@@ -541,10 +489,10 @@ function LoginScreen({ onGoogleLogin, schoolName }) {
   );
 }
 
-function AttendanceModule({ user, members, attendance, setAttendance, teacherEmails }) {
+function AttendanceModule({ user, members, attendance, teacherEmails }) {
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
 
-  // 教師を除外し、生徒のみを表示（卒業生も除外）
+  // 教師を除外し、生徒のみを表示
   const activeMembers = members.filter(m => {
     const isTeacher = teacherEmails.map(e => e.toLowerCase()).includes(m.email?.toLowerCase());
     const isGraduated = m.grade && m.grade.includes('卒業');
@@ -553,30 +501,26 @@ function AttendanceModule({ user, members, attendance, setAttendance, teacherEma
 
   const todayAtt = attendance[selectedDate] || {};
 
-  const handleStatusChange = (userId, status) => {
-    setAttendance(prev => ({
-      ...prev,
-      [selectedDate]: {
-        ...(prev[selectedDate] || {}),
-        [userId]: {
-          status,
-          reason: (prev[selectedDate]?.[userId]?.reason || '')
-        }
+  const handleStatusChange = async (userId, status) => {
+    const currentData = todayAtt[userId] || {};
+    await setDoc(doc(db, 'attendance', selectedDate), {
+      ...todayAtt,
+      [userId]: {
+        status,
+        reason: currentData.reason || ''
       }
-    }));
+    });
   };
 
-  const handleReasonChange = (userId, reason) => {
-    setAttendance(prev => ({
-      ...prev,
-      [selectedDate]: {
-        ...(prev[selectedDate] || {}),
-        [userId]: {
-          status: prev[selectedDate]?.[userId]?.status || 'present',
-          reason
-        }
+  const handleReasonChange = async (userId, reason) => {
+    const currentData = todayAtt[userId] || {};
+    await setDoc(doc(db, 'attendance', selectedDate), {
+      ...todayAtt,
+      [userId]: {
+        status: currentData.status || 'present',
+        reason
       }
-    }));
+    });
   };
 
   const displayedMembers = user.role === 'student' ? activeMembers.filter(m => m.id === user.id) : activeMembers;
@@ -601,7 +545,7 @@ function AttendanceModule({ user, members, attendance, setAttendance, teacherEma
         <div className="bg-indigo-900 text-white p-4 sm:p-6 rounded-3xl shadow-md flex items-center justify-between">
           <div>
             <p className="text-xs text-indigo-200 font-bold uppercase tracking-wider">教師閲覧モード</p>
-            <p className="text-sm sm:text-base font-bold mt-1">生徒の出欠状態および理由を確認できます（生徒は自分以外の出欠は見えません）。</p>
+            <p className="text-sm sm:text-base font-bold mt-1">生徒の出欠状態および理由を確認できます。</p>
           </div>
         </div>
       )}
@@ -689,7 +633,7 @@ function AttendanceModule({ user, members, attendance, setAttendance, teacherEma
   );
 }
 
-function ScheduleModule({ user, schedules, setSchedules, teacherEmails, setTeacherEmails }) {
+function ScheduleModule({ user, schedules, teacherEmails }) {
   const [currentYearMonth, setCurrentYearMonth] = useState(() => {
     const d = new Date();
     return { year: d.getFullYear(), month: d.getMonth() };
@@ -734,7 +678,7 @@ function ScheduleModule({ user, schedules, setSchedules, teacherEmails, setTeach
     return arr;
   }, [currentYearMonth, daysInMonth, firstDayOfWeek]);
 
-  const handleAddSchedule = (e) => {
+  const handleAddSchedule = async (e) => {
     e.preventDefault();
     if (!newTitle.trim() || !newDate) return;
     const item = {
@@ -746,15 +690,15 @@ function ScheduleModule({ user, schedules, setSchedules, teacherEmails, setTeach
       location: newLocation,
       notes: newNotes.trim()
     };
-    setSchedules(prev => [...prev, item]);
+    await setDoc(doc(db, 'schedules', item.id), item);
     setNewTitle('');
     setNewNotes('');
     setIsAdding(false);
   };
 
-  const handleDeleteSchedule = (id) => {
+  const handleDeleteSchedule = async (id) => {
     if (window.confirm('この予定を削除しますか？')) {
-      setSchedules(prev => prev.filter(s => s.id !== id));
+      await deleteDoc(doc(db, 'schedules', id));
     }
   };
 
@@ -939,12 +883,17 @@ function ScheduleModule({ user, schedules, setSchedules, teacherEmails, setTeach
   );
 }
 
-function PracticeModule({ user, practiceMenus, setPracticeMenus }) {
+function PracticeModule({ user, practiceMenus }) {
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [editMenuText, setEditMenuText] = useState('');
   const [isEditing, setIsEditing] = useState(false);
 
   const currentMenu = practiceMenus[selectedDate]?.menu || 'この日の練習メニューはまだ登録されていません。';
+
+  const handleSaveMenu = async () => {
+    await setDoc(doc(db, 'practice', selectedDate), { menu: editMenuText });
+    setIsEditing(false);
+  };
 
   return (
     <div className="space-y-6">
@@ -967,7 +916,7 @@ function PracticeModule({ user, practiceMenus, setPracticeMenus }) {
           <div className="space-y-3">
             <textarea rows="8" value={editMenuText} onChange={(e) => setEditMenuText(e.target.value)} className="w-full border-2 border-slate-200 rounded-2xl p-4 text-sm font-bold focus:outline-none focus:border-indigo-500" placeholder="練習メニューを記載してください..."></textarea>
             <div className="flex gap-2">
-              <button onClick={() => { setPracticeMenus(p => ({ ...p, [selectedDate]: { menu: editMenuText } })); setIsEditing(false); }} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-5 py-2.5 rounded-xl text-xs sm:text-sm shadow">保存する</button>
+              <button onClick={handleSaveMenu} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-5 py-2.5 rounded-xl text-xs sm:text-sm shadow">保存する</button>
               <button onClick={() => setIsEditing(false)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2.5 rounded-xl text-xs sm:text-sm">キャンセル</button>
             </div>
           </div>
@@ -981,21 +930,25 @@ function PracticeModule({ user, practiceMenus, setPracticeMenus }) {
   );
 }
 
-function ActivityModule({ user, members, activities, setActivities, teacherEmails }) {
+function ActivityModule({ user, members, activities, teacherEmails }) {
   const [newDate, setNewDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [newContent, setNewContent] = useState('');
   const [teacherCommentInput, setTeacherCommentInput] = useState({});
   const [selectedStudentId, setSelectedStudentId] = useState('all');
 
-  const handleAddActivity = (e) => {
+  const handleAddActivity = async (e) => {
     e.preventDefault();
     if (!newContent.trim()) return;
     const item = { id: 'act_' + Date.now(), userId: user.id, userName: user.name, date: newDate, content: newContent.trim(), comment: '' };
-    setActivities(prev => [item, ...prev]);
+    await setDoc(doc(db, 'activities', item.id), item);
     setNewContent('');
   };
 
-  // 教師を除外して生徒のみを選択肢に表示
+  const handleSaveComment = async (act) => {
+    const commentText = teacherCommentInput[act.id] ?? act.comment;
+    await setDoc(doc(db, 'activities', act.id), { ...act, comment: commentText });
+  };
+
   const activeMembers = members.filter(m => {
     const isTeacher = teacherEmails.map(e => e.toLowerCase()).includes(m.email?.toLowerCase());
     const isGraduated = m.grade && m.grade.includes('卒業');
@@ -1019,7 +972,6 @@ function ActivityModule({ user, members, activities, setActivities, teacherEmail
         )}
       </div>
 
-      {/* 活動記録の投稿フォームは「生徒」の場合のみ表示 */}
       {user.role === 'student' && (
         <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
           <h3 className="text-sm font-black text-slate-900 mb-4">新規活動記録の投稿</h3>
@@ -1060,7 +1012,7 @@ function ActivityModule({ user, members, activities, setActivities, teacherEmail
                     <label className="block text-xs font-bold text-indigo-700">教師からのコメント:</label>
                     <div className="flex gap-2">
                       <input type="text" defaultValue={act.comment} onChange={(e) => setTeacherCommentInput(p => ({ ...p, [act.id]: e.target.value }))} placeholder="コメントを入力..." className="flex-1 border-2 border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-indigo-500" />
-                      <button onClick={() => setActivities(prev => prev.map(a => a.id === act.id ? { ...a, comment: teacherCommentInput[act.id] ?? a.comment } : a))} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2 rounded-xl shadow">送信</button>
+                      <button onClick={() => handleSaveComment(act)} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2 rounded-xl shadow">送信</button>
                     </div>
                   </div>
                 ) : (
@@ -1078,7 +1030,7 @@ function ActivityModule({ user, members, activities, setActivities, teacherEmail
   );
 }
 
-function MediaModule({ user, mediaList, setMediaList }) {
+function MediaModule({ user, mediaList }) {
   const [title, setTitle] = useState('');
   const [url, setUrl] = useState('');
   const [type, setType] = useState('image');
@@ -1088,9 +1040,10 @@ function MediaModule({ user, mediaList, setMediaList }) {
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) {
       alert("ファイルサイズが5MBを超えています。大きな動画はYouTube等のリンクをご利用ください。");
+      return;
     }
     const reader = new FileReader();
-    reader.onload = (uploadEvent) => {
+    reader.onload = async (uploadEvent) => {
       const fileDataUrl = uploadEvent.target.result;
       const newItem = {
         id: 'med_' + Date.now(),
@@ -1100,17 +1053,17 @@ function MediaModule({ user, mediaList, setMediaList }) {
         uploader: user.name,
         date: new Date().toISOString().split('T')[0]
       };
-      setMediaList(prev => [newItem, ...prev]);
+      await setDoc(doc(db, 'media', newItem.id), newItem);
       setTitle('');
     };
     reader.readAsDataURL(file);
   };
 
-  const handleAddUrlMedia = (e) => {
+  const handleAddUrlMedia = async (e) => {
     e.preventDefault();
     if (!title.trim() || !url.trim()) return;
     const newItem = { id: 'med_' + Date.now(), title: title.trim(), url: url.trim(), type, uploader: user.name, date: new Date().toISOString().split('T')[0] };
-    setMediaList(prev => [newItem, ...prev]);
+    await setDoc(doc(db, 'media', newItem.id), newItem);
     setTitle('');
     setUrl('');
   };
@@ -1295,14 +1248,14 @@ function TacticsModule() {
   );
 }
 
-function MembersModule({ user, setUser, members, setMembers, activities, setActivities, teacherEmails, setTeacherEmails }) {
+function MembersModule({ user, setUser, members, activities, teacherEmails }) {
   const [memberTab, setMemberTab] = useState('active');
   const [newTeacherEmail, setNewTeacherEmail] = useState('');
 
   const activeMembers = members.filter(m => !m.grade || !m.grade.includes('卒業'));
   const graduateMembers = members.filter(m => m.grade && m.grade.includes('卒業'));
 
-  const handleAddTeacherEmail = (e) => {
+  const handleAddTeacherEmail = async (e) => {
     e.preventDefault();
     if (!newTeacherEmail.trim()) return;
     const cleanEmail = newTeacherEmail.toLowerCase().trim();
@@ -1310,15 +1263,16 @@ function MembersModule({ user, setUser, members, setMembers, activities, setActi
       alert("このメールアドレスは既に教師として登録されています。");
       return;
     }
-    setTeacherEmails(prev => [...prev, cleanEmail]);
+    const updated = [...teacherEmails, cleanEmail];
+    await setDoc(doc(db, 'settings', 'teachers'), { emails: updated });
     setNewTeacherEmail('');
     alert(`教師用アドレスに ${cleanEmail} を追加しました。`);
   };
 
-  const handleRemoveTeacherEmail = (emailToRemove) => {
-    if (window.confirm(`「${emailToRemove}」の教師権限を取り消しますか？次回ログイン時（または更新時）に生徒アカウントとして扱われます。`)) {
+  const handleRemoveTeacherEmail = async (emailToRemove) => {
+    if (window.confirm(`「${emailToRemove}」の教師権限を取り消しますか？`)) {
       const updatedList = teacherEmails.filter(e => e.toLowerCase() !== emailToRemove.toLowerCase());
-      setTeacherEmails(updatedList);
+      await setDoc(doc(db, 'settings', 'teachers'), { emails: updatedList });
       
       if (user.email.toLowerCase() === emailToRemove.toLowerCase()) {
         setUser(prev => ({ ...prev, role: 'student', grade: '1' }));
@@ -1326,13 +1280,14 @@ function MembersModule({ user, setUser, members, setMembers, activities, setActi
     }
   };
 
-  const handleToggleUserRole = (targetMember) => {
+  const handleToggleUserRole = async (targetMember) => {
     const isCurrentlyTeacher = teacherEmails.map(e => e.toLowerCase()).includes(targetMember.email?.toLowerCase());
 
     if (isCurrentlyTeacher) {
       if (window.confirm(`「${targetMember.name}」の教師権限を剥奪して「生徒」に変更しますか？`)) {
-        setTeacherEmails(prev => prev.filter(e => e.toLowerCase() !== targetMember.email.toLowerCase()));
-        setMembers(prev => prev.map(m => m.id === targetMember.id ? { ...m, role: 'student', grade: '1' } : m));
+        const updatedEmails = teacherEmails.filter(e => e.toLowerCase() !== targetMember.email.toLowerCase());
+        await setDoc(doc(db, 'settings', 'teachers'), { emails: updatedEmails });
+        await setDoc(doc(db, 'members', targetMember.id), { ...targetMember, role: 'student', grade: '1' });
         
         if (user.email.toLowerCase() === targetMember.email.toLowerCase()) {
           setUser(prev => ({ ...prev, role: 'student', grade: '1' }));
@@ -1340,36 +1295,36 @@ function MembersModule({ user, setUser, members, setMembers, activities, setActi
       }
     } else {
       if (window.confirm(`「${targetMember.name}」を「教師・顧問」として登録しますか？`)) {
-        setTeacherEmails(prev => [...prev, targetMember.email.toLowerCase()]);
-        setMembers(prev => prev.map(m => m.id === targetMember.id ? { ...m, role: 'teacher', grade: '顧問' } : m));
+        const updatedEmails = [...teacherEmails, targetMember.email.toLowerCase()];
+        await setDoc(doc(db, 'settings', 'teachers'), { emails: updatedEmails });
+        await setDoc(doc(db, 'members', targetMember.id), { ...targetMember, role: 'teacher', grade: '顧問' });
       }
     }
   };
 
-  const handleToggleGraduation = (id) => {
-    setMembers(prev => prev.map(m => {
-      if (m.id === id) {
-        if (m.grade && m.grade.includes('卒業')) {
-          return { ...m, grade: '3' };
-        } else {
-          const yearInput = prompt("卒業年度を入力してください（例: 2026）:", String(new Date().getFullYear()));
-          if (yearInput !== null) {
-            return { ...m, grade: `卒業 (${yearInput.trim()}年度)` };
-          }
-        }
+  const handleToggleGraduation = async (member) => {
+    if (member.grade && member.grade.includes('卒業')) {
+      await setDoc(doc(db, 'members', member.id), { ...member, grade: '3' });
+    } else {
+      const yearInput = prompt("卒業年度を入力してください（例: 2026）:", String(new Date().getFullYear()));
+      if (yearInput !== null) {
+        await setDoc(doc(db, 'members', member.id), { ...member, grade: `卒業 (${yearInput.trim()}年度)` });
       }
-      return m;
-    }));
+    }
   };
 
-  const handleDeleteMember = (id) => {
+  const handleDeleteMember = async (id) => {
     if (window.confirm('このアカウントと、関連するすべての「活動記録」データを完全に削除しますか？\n（※この操作は元に戻せません）')) {
-      // 生徒データを削除（この後、AppのuseEffectが自動的にactivitiesも掃除してくれます）
-      setMembers(prev => prev.filter(m => m.id !== id));
+      // 1. メンバーを削除
+      await deleteDoc(doc(db, 'members', id));
+      // 2. 該当生徒の活動記録をすべて削除
+      const targetActs = activities.filter(a => a.userId === id);
+      for (const act of targetActs) {
+        await deleteDoc(doc(db, 'activities', act.id));
+      }
     }
   };
 
-  // テキスト形式でのデータ書き出し
   const handleExportTextData = (member) => {
     const memberActivities = activities.filter(a => a.userId === member.id);
     
@@ -1514,7 +1469,7 @@ function MembersModule({ user, setUser, members, setMembers, activities, setActi
                           {!isTeacherAccount && (
                             <>
                               <button onClick={() => handleExportTextData(m)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-3 py-1.5 rounded-xl text-xs transition">テキスト出力</button>
-                              <button onClick={() => handleToggleGraduation(m.id)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-3 py-1.5 rounded-xl text-xs transition">
+                              <button onClick={() => handleToggleGraduation(m)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-3 py-1.5 rounded-xl text-xs transition">
                                 {m.grade && m.grade.includes('卒業') ? '現役復帰' : '卒部にする'}
                               </button>
                             </>
